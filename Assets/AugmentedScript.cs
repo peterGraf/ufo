@@ -29,13 +29,19 @@ using UnityEngine.UI;
 
 public class AugmentedScript : MonoBehaviour
 {
+    private float _ufoLatitude;
+    private float _ufoLongitude;
     private float _originalLatitude;
     private float _originalLongitude;
     private float _currentLongitude;
     private float _currentLatitude;
     private float _distance;
+    private float _latDistance;
+    private float _lonDistance;
     private float _heading;
+    private float _headingShown;
 
+    private GameObject _sceneAnchor;
     private GameObject _distanceTextObject;
     private string _locationError = null;
 
@@ -50,47 +56,52 @@ public class AugmentedScript : MonoBehaviour
     {
         for (; ; )
         {
-            // Check if user has location service enabled
-            if (!Input.location.isEnabledByUser)
-            {
-                _locationError = "Please enable the location service.";
-                yield break;
-            }
-
-            // Enable the compass
-            Input.compass.enabled = true;
-
-            // Start service before querying location
-            Input.location.Start(1f, .1f);
-
-            // Wait until service initializes
-            int maxWait = 20;
-            while (Input.location.status == LocationServiceStatus.Initializing && maxWait > 0)
-            {
-                yield return new WaitForSeconds(1);
-                maxWait--;
-            }
-
-            // Service didn't initialize in 20 seconds
-            if (maxWait < 1)
-            {
-                _locationError = "Location service timed out.";
-                yield break;
-            }
-
-            // Connection has failed
-            if (Input.location.status == LocationServiceStatus.Failed)
-            {
-                _locationError = "Unable to determine device location";
-                yield break;
-            }
-
             // If original value has not yet been set save coordinates of player on app start
             if (_setOriginalValues)
             {
+                _setOriginalValues = false;
+
+                // Check if user has location service enabled
+                if (!Input.location.isEnabledByUser)
+                {
+                    _locationError = "Please enable the location service.";
+                    yield break;
+                }
+
+                // Enable the compass
+                Input.compass.enabled = true;
+
+                // Start service before querying location
+                Input.location.Start(1f, .1f);
+
+                // Wait until service initializes
+                int maxWait = 20;
+                while (Input.location.status == LocationServiceStatus.Initializing && maxWait > 0)
+                {
+                    yield return new WaitForSeconds(1);
+                    maxWait--;
+                }
+
+                // Service didn't initialize in 20 seconds
+                if (maxWait < 1)
+                {
+                    _locationError = "Location service timed out.";
+                    yield break;
+                }
+
+                // Connection has failed
+                if (Input.location.status == LocationServiceStatus.Failed)
+                {
+                    _locationError = "Unable to determine device location";
+                    yield break;
+                }
+
                 _originalLatitude = Input.location.lastData.latitude;
                 _originalLongitude = Input.location.lastData.longitude;
-                _setOriginalValues = false;
+
+                // place the ufo some way towards the north east
+                _ufoLatitude = _originalLatitude + (float)0.000250;
+                _ufoLongitude = _originalLongitude + (float)0.000250;
             }
 
             // Overwrite current lat and lon everytime
@@ -98,16 +109,20 @@ public class AugmentedScript : MonoBehaviour
             _currentLongitude = Input.location.lastData.longitude;
 
             // Calculate the distance between where the player was when the app started and where they are now.
-            _distance = Calc(_originalLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
+            //_distance = Calc(_originalLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
+
+            _latDistance = Calc(_ufoLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
+            _lonDistance = Calc(_currentLatitude, _ufoLongitude, _currentLatitude, _currentLongitude);
+
+            _distance = Mathf.Sqrt(_latDistance * _latDistance + _lonDistance * _lonDistance);
 
             // Set the target position of the ufo, this is where we lerp to in the update function
-            _targetPosition = _originalPosition - new Vector3(0, 0, _distance * 12);
-            // Distance was multiplied by 12 so I didn't have to walk that far to get the UFO to show up closer
+            _targetPosition = new Vector3(0, _originalPosition.y, _distance);
 
             // Get the heading from the compass
             _heading = Input.compass.trueHeading;
 
-            Input.location.Stop();
+            yield return null;
         }
     }
 
@@ -127,8 +142,9 @@ public class AugmentedScript : MonoBehaviour
 
     void Start()
     {
-        // Get distance text reference
+        // Get references to objects
         _distanceTextObject = GameObject.FindGameObjectWithTag("distanceText");
+        _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
 
         // Start GetCoordinate() function 
         StartCoroutine("GetCoordinates");
@@ -140,11 +156,13 @@ public class AugmentedScript : MonoBehaviour
 
     void Update()
     {
+        _headingShown += (float)((_heading - _headingShown) / 10.0);
+        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+
         // Linearly interpolate from current position to target position
         transform.position = Vector3.Lerp(transform.position, _targetPosition, _speed);
 
-        // Rotate by 1 degree about the y axis every frame
-        transform.eulerAngles += new Vector3(0, 1f, 0);
+        transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
 
         // Set the distance text on the canvas
         if (!string.IsNullOrEmpty(_locationError))
@@ -154,8 +172,8 @@ public class AugmentedScript : MonoBehaviour
         }
         _distanceTextObject.GetComponent<Text>().text =
             "D " + _distance.ToString("F")
-            + " Lat " + _currentLatitude.ToString("F6")
-            + " Lon " + _currentLongitude.ToString("F6")
-            + " H " + (Input.compass.enabled ? _heading.ToString("F") : "disabled");
+            + " Lat " + (_originalLatitude - _currentLatitude).ToString("F6")
+            + " Lon " + (_originalLongitude - _currentLongitude).ToString("F6")
+            + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");
     }
 }

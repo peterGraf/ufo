@@ -26,11 +26,12 @@ please see: http://www.mission-base.com/.
 using UnityEngine;
 using System.Collections;
 using UnityEngine.UI;
+using UnityEngine.Networking;
 
 public class AugmentedScript : MonoBehaviour
 {
-    private float _ufoLatitude;
-    private float _ufoLongitude;
+    private float _ufoLatitude = 0f;
+    private float _ufoLongitude = 0f;
     private float _originalLatitude;
     private float _originalLongitude;
     private float _currentLongitude;
@@ -54,7 +55,7 @@ public class AugmentedScript : MonoBehaviour
 
     private IEnumerator GetCoordinates()
     {
-        for (; ; )
+        while (string.IsNullOrEmpty(_locationError) )
         {
             // If original value has not yet been set save coordinates of player on app start
             if (_setOriginalValues)
@@ -99,9 +100,44 @@ public class AugmentedScript : MonoBehaviour
                 _originalLatitude = Input.location.lastData.latitude;
                 _originalLongitude = Input.location.lastData.longitude;
 
-                // place the ufo some way towards the north east
-                _ufoLatitude = _originalLatitude + (float)0.000250;
-                _ufoLongitude = _originalLongitude + (float)0.000250;
+                UnityWebRequest www = UnityWebRequest.Get("http://www.mission-base.com/ufo.txt");
+                yield return www.SendWebRequest();
+
+                if (www.isNetworkError || www.isHttpError)
+                {
+                    _locationError = www.error;
+                    yield break;
+                }
+
+                // Get results as text
+                var text = www.downloadHandler.text;
+                if (string.IsNullOrEmpty(text))
+                {
+                    _locationError = "received empty text";
+                    yield break;
+                }
+
+                // place the ufo
+                var parts = text.Split(',');
+                if (parts.Length != 3)
+                {
+                    _locationError = "bad text: " + text;
+                    yield break;
+                }
+                double value;
+                if (!double.TryParse(parts[1], out value))
+                {
+                    _locationError = "bad lat: " + parts[1];
+                    yield break;
+                }
+                _ufoLatitude = (float)value;
+
+                if (!double.TryParse(parts[2], out value))
+                {
+                    _locationError = "bad lon: " + parts[2];
+                    yield break;
+                }
+                _ufoLongitude = (float)value;
             }
 
             // Overwrite current lat and lon everytime
@@ -172,8 +208,8 @@ public class AugmentedScript : MonoBehaviour
         }
         _distanceTextObject.GetComponent<Text>().text =
             "D " + _distance.ToString("F")
-            + " Lat " + (_originalLatitude - _currentLatitude).ToString("F6")
-            + " Lon " + (_originalLongitude - _currentLongitude).ToString("F6")
+            + " Lat " + (_currentLatitude).ToString("F6")
+            + " Lon " + (_currentLongitude).ToString("F6")
             + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");
     }
 }

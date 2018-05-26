@@ -131,14 +131,29 @@ public class AugmentedScript : MonoBehaviour
                         continue;
                     }
 
+                    string name;
+                    GameObject gameObject;
+
                     var parts = line.Split(',');
+                    if (parts.Length == 1)
+                    {
+                        name = parts[0];
+                        gameObject = GameObject.FindGameObjectWithTag(name);
+                        if (gameObject == null)
+                        {
+                            _locationError = "line '" + line + "', bad name: " + name;
+                            yield break;
+                        }
+                        Destroy(gameObject, .1f);
+                        continue;
+                    }
                     if (parts.Length != 3)
                     {
                         _locationError = "line '" + line + "', bad text: " + text;
                         yield break;
                     }
-                    var name = parts[0];
-                    var gameObject = GameObject.FindGameObjectWithTag(name);
+                    name = parts[0];
+                    gameObject = GameObject.FindGameObjectWithTag(name);
                     if (gameObject == null)
                     {
                         _locationError = "line '" + line + "', bad name: " + name;

@@ -27,18 +27,23 @@ using UnityEngine;
 using System.Collections;
 using UnityEngine.UI;
 using UnityEngine.Networking;
+using System.Collections.Generic;
+
+public class ArObject
+{
+    public GameObject GameObject;
+    public string Text;
+    public float Latitude;
+    public float Longitude;
+    public Vector3 TargetPosition;
+}
 
 public class AugmentedScript : MonoBehaviour
 {
-    private float _ufoLatitude = 0f;
-    private float _ufoLongitude = 0f;
     private float _originalLatitude;
     private float _originalLongitude;
     private float _currentLongitude;
     private float _currentLatitude;
-    private float _distance;
-    private float _latDistance;
-    private float _lonDistance;
     private float _heading;
     private float _headingShown;
 
@@ -48,14 +53,13 @@ public class AugmentedScript : MonoBehaviour
 
     private bool _setOriginalValues = true;
 
-    private Vector3 _targetPosition;
-    private Vector3 _originalPosition;
-
     private float _speed = .1f;
+
+    private List<ArObject> _arObjects = new List<ArObject>();
 
     private IEnumerator GetCoordinates()
     {
-        while (string.IsNullOrEmpty(_locationError) )
+        while (string.IsNullOrEmpty(_locationError))
         {
             // If original value has not yet been set save coordinates of player on app start
             if (_setOriginalValues)
@@ -100,7 +104,7 @@ public class AugmentedScript : MonoBehaviour
                 _originalLatitude = Input.location.lastData.latitude;
                 _originalLongitude = Input.location.lastData.longitude;
 
-                UnityWebRequest www = UnityWebRequest.Get("http://www.mission-base.com/ufo.txt");
+                UnityWebRequest www = UnityWebRequest.Get("http://www.mission-base.com/ArvosVun.txt");
                 yield return www.SendWebRequest();
 
                 if (www.isNetworkError || www.isHttpError)
@@ -117,47 +121,71 @@ public class AugmentedScript : MonoBehaviour
                     yield break;
                 }
 
-                // place the ufo
-                var parts = text.Split(',');
-                if (parts.Length != 3)
+                // place the objects
+                var lines = text.Split('\n');
+                foreach (var line in lines)
                 {
-                    _locationError = "bad text: " + text;
-                    yield break;
-                }
-                double value;
-                if (!double.TryParse(parts[1], out value))
-                {
-                    _locationError = "bad lat: " + parts[1];
-                    yield break;
-                }
-                _ufoLatitude = (float)value;
+                    if(string.IsNullOrEmpty(line))
+                    {
+                        continue;
+                    }
 
-                if (!double.TryParse(parts[2], out value))
+                    var parts = line.Split(',');
+                    if (parts.Length != 3)
+                    {
+                        _locationError = "line '" + line + "', bad text: " + text;
+                        yield break;
+                    }
+                    var name = parts[0];
+                    var gameObject = GameObject.FindGameObjectWithTag(name);
+                    if (gameObject == null)
+                    {
+                        _locationError = "line '" + line + "', bad name: " + name;
+                        yield break;
+                    }
+
+                    double value;
+                    if (!double.TryParse(parts[1], out value))
+                    {
+                        _locationError = "line '" + line + "', bad lat: " + parts[1];
+                        yield break;
+                    }
+                    var latitude = (float)value;
+
+                    if (!double.TryParse(parts[2], out value))
+                    {
+                        _locationError = "line '" + line + "', bad lon: " + parts[2];
+                        yield break;
+                    }
+                    var longitude = (float)value;
+
+                    var arObject = new ArObject { Text = line, GameObject = gameObject, Latitude = latitude, Longitude = longitude };
+                    _arObjects.Add(arObject);
+                }
+
+                if (!string.IsNullOrEmpty(_locationError))
                 {
-                    _locationError = "bad lon: " + parts[2];
                     yield break;
                 }
-                _ufoLongitude = (float)value;
             }
 
             // Overwrite current lat and lon everytime
             _currentLatitude = Input.location.lastData.latitude;
             _currentLongitude = Input.location.lastData.longitude;
 
-            // Calculate the distance between where the player was when the app started and where they are now.
-            //_distance = Calc(_originalLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
-
-            _latDistance = Calc(_ufoLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
-            _lonDistance = Calc(_currentLatitude, _ufoLongitude, _currentLatitude, _currentLongitude);
-
-            _distance = Mathf.Sqrt(_latDistance * _latDistance + _lonDistance * _lonDistance);
-
-            // Set the target position of the ufo, this is where we lerp to in the update function
-            _targetPosition = new Vector3(0, _originalPosition.y, _distance);
-
             // Get the heading from the compass
             _heading = Input.compass.trueHeading;
 
+            foreach (var arObject in _arObjects)
+            {
+                var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
+                var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
+
+                var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+
+                // Set the target position of the object, this is where we lerp to in update
+                arObject.TargetPosition = new Vector3(0, arObject.GameObject.transform.position.y, distance);
+            }
             yield return null;
         }
     }
@@ -184,30 +212,35 @@ public class AugmentedScript : MonoBehaviour
 
         // Start GetCoordinate() function 
         StartCoroutine("GetCoordinates");
-
-        // Initialize target and original position
-        _targetPosition = transform.position;
-        _originalPosition = transform.position;
     }
 
     void Update()
     {
-        _headingShown += (float)((_heading - _headingShown) / 10.0);
-        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
-
-        // Linearly interpolate from current position to target position
-        transform.position = Vector3.Lerp(transform.position, _targetPosition, _speed);
-
-        transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
-
         // Set the distance text on the canvas
         if (!string.IsNullOrEmpty(_locationError))
         {
             _distanceTextObject.GetComponent<Text>().text = _locationError;
             return;
         }
+
+        _headingShown += (float)((_heading - _headingShown) / 10.0);
+        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+
+        foreach (var arObject in _arObjects)
+        {
+            // Linearly interpolate from current position to target position
+            arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, arObject.TargetPosition, _speed);
+            arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+        }
+
+        var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
+        var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
+
+        var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+
         _distanceTextObject.GetComponent<Text>().text =
-            "D " + _distance.ToString("F")
+            "D " + distance.ToString("F")
+            + " N " + _arObjects.Count
             + " Lat " + (_currentLatitude).ToString("F6")
             + " Lon " + (_currentLongitude).ToString("F6")
             + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");

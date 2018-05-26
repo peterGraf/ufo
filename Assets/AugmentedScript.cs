@@ -49,6 +49,7 @@ public class AugmentedScript : MonoBehaviour
 
     private GameObject _sceneAnchor;
     private GameObject _distanceTextObject;
+    private GameObject _wrapper;
     private string _locationError = null;
 
     private bool _setOriginalValues = true;
@@ -143,6 +144,22 @@ public class AugmentedScript : MonoBehaviour
                         _locationError = "line '" + line + "', bad name: " + name;
                         yield break;
                     }
+                    
+                    var wrapper = Instantiate(_wrapper);
+                    if (wrapper == null)
+                    {
+                        _locationError = "Instantiate(_wrapper) failed";
+                        yield break;
+                    }
+                    wrapper.transform.parent = _sceneAnchor.transform;
+
+                    gameObject = Instantiate(gameObject);
+                    if (gameObject == null)
+                    {
+                        _locationError = "Instantiate(gameObject) failed";
+                        yield break;
+                    }
+                    gameObject.transform.parent = wrapper.transform;
 
                     double value;
                     if (!double.TryParse(parts[1], out value))
@@ -159,7 +176,7 @@ public class AugmentedScript : MonoBehaviour
                     }
                     var longitude = (float)value;
 
-                    var arObject = new ArObject { Text = line, GameObject = gameObject, Latitude = latitude, Longitude = longitude };
+                    var arObject = new ArObject { Text = line, GameObject = wrapper, Latitude = latitude, Longitude = longitude };
                     _arObjects.Add(arObject);
                 }
 
@@ -209,6 +226,7 @@ public class AugmentedScript : MonoBehaviour
         // Get references to objects
         _distanceTextObject = GameObject.FindGameObjectWithTag("distanceText");
         _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
+        _wrapper = GameObject.FindGameObjectWithTag("Wrapper");
 
         // Start GetCoordinate() function 
         StartCoroutine("GetCoordinates");

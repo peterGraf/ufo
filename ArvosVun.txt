@@ -1,0 +1,23 @@
+# Config file for ArvosVun app
+#
+# Each entry is of the form
+# ObjectTag, Object name to set after instantiation, latitude, longitude
+#
+RedCube,RC1,48.158860,11.578810
+RedCube,RC2,48.158760,11.578810
+BlueCube,BC1,48.158880,11.578810
+GreenCube,GC1,48.158860,11.578830
+#
+# These entries instantiate an object relative to player
+#
+BlueCube,BC2
+#
+# These entries destroy the original game objects, so they are not visible in the scene
+#
+RedCube
+GreenCube
+BlueCube
+#
+# This turns on the information string
+#
+ShowInfo

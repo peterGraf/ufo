@@ -39,29 +39,28 @@ public class ArObject
     public string Text;
     public float Latitude;
     public float Longitude;
+    public float RelativeAltitude;
     public Vector3 TargetPosition;
     public bool IsRelative;
 }
 
 public class AugmentedScript : MonoBehaviour
 {
-    private float _currentLongitude;
-    private float _currentLatitude;
-    private float _currentHeading;
-    private float _originalLatitude;
-    private float _originalLongitude;
-    private float _headingShown;
+    private float _currentLongitude = 0;
+    private float _currentLatitude = 0;
+    private float _currentHeading = 0;
+    private float _originalLatitude = 0;
+    private float _originalLongitude = 0;
+    private float _headingShown = 0;
 
-    private GameObject _sceneAnchor;
-    private GameObject _infoTextObject;
-    private GameObject _wrapper;
+    private GameObject _sceneAnchor = null;
+    private GameObject _infoText = null;
+    private GameObject _wrapper = null;
 
     private bool _showInfo = false;
     private string _error = null;
 
     private bool _doInitialize = true;
-
-    private const float _speed = .1f;
 
     private List<ArObject> _arObjects = new List<ArObject>();
 
@@ -160,34 +159,54 @@ public class AugmentedScript : MonoBehaviour
                             _showInfo = true;
                             continue;
                         }
-
-                        // Destroy the objects, so they are not visible in the scene
-                        arGameObjectTag = parts[0].Trim();
-                        try
+                        else
                         {
-                            arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
-                        }
-                        catch (Exception)
-                        { }
-                        if (arGameObject == null)
-                        {
-                            _error = "line '" + line + "', bad tag: " + arGameObjectTag;
+                            _error = line + "', bad command: " + parts[0].Trim();
                             break;
                         }
-                        Destroy(arGameObject, .1f);
-                        continue;
+                    }
+                    if (parts.Length == 2)
+                    {
+                        if ("DEL".Equals(parts[0].Trim()))
+                        {
+                            // Destroy the objects, so they are not visible in the scene
+                            arGameObjectTag = parts[1].Trim();
+                            try
+                            {
+                                arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
+                            }
+                            catch (Exception)
+                            { }
+                            if (arGameObject == null)
+                            {
+                                _error = line + ", bad tag: " + arGameObjectTag;
+                                break;
+                            }
+                            Destroy(arGameObject, .1f);
+                            continue;
+                        }
+                        else
+                        {
+                            _error = line + ", bad command: " + parts[0].Trim();
+                            break;
+                        }
                     }
 
-                    // 2 parts: Tag, Name to set
-                    // 4 parts: Tag, Name to set, Lat, Lon
-                    if (parts.Length != 4 && parts.Length != 2)
+                    // 6 parts: Command,Tag, Name to set, Lat, Lon, alt
+                    if (parts.Length != 6)
                     {
-                        _error = "line '" + line + "', bad text: " + text;
+                        _error = line + ", bad text: ";
+                        break;
+                    }
+
+                    if (!"REL".Equals(parts[0].Trim()) && !"ABS".Equals(parts[0].Trim()))
+                    {
+                        _error = line + ", bad command: " + parts[0].Trim();
                         break;
                     }
 
                     // First part is the tag of the game object
-                    arGameObjectTag = parts[0].Trim();
+                    arGameObjectTag = parts[1].Trim();
                     try
                     {
                         arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
@@ -219,30 +238,45 @@ public class AugmentedScript : MonoBehaviour
                     arGameObject.transform.parent = wrapper.transform;
 
                     // Set the name of the instantiated game object
-                    arGameObject.name = parts[1].Trim();
+                    arGameObject.name = parts[2].Trim();
 
-                    if (parts.Length == 4)
+                    if ("ABS".Equals(parts[0].Trim()))
                     {
                         // Get lat and lon of the object
                         double value;
-                        if (!double.TryParse(parts[2].Trim(), out value))
+                        if (!double.TryParse(parts[3].Trim(), out value))
                         {
-                            _error = "line '" + line + "', bad lat: " + parts[2].Trim();
+                            _error = line + ", bad lat: " + parts[3].Trim();
                             break;
                         }
                         var latitude = (float)value;
 
-                        if (!double.TryParse(parts[3].Trim(), out value))
+                        if (!double.TryParse(parts[4].Trim(), out value))
                         {
-                            _error = "line '" + line + "', bad lon: " + parts[3].Trim();
+                            _error = line + ", bad lon: " + parts[4].Trim();
                             break;
                         }
                         var longitude = (float)value;
 
+                        if (!double.TryParse(parts[5].Trim(), out value))
+                        {
+                            _error = line + ", bad alt: " + parts[5].Trim();
+                            break;
+                        }
+                        var altitude = (float)value;
+
                         // Create the ar object
-                        var arObject = new ArObject { IsRelative = false, Text = line, GameObject = wrapper, Latitude = latitude, Longitude = longitude };
-                        var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
-                        var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
+                        var arObject = new ArObject
+                        {
+                            IsRelative = false,
+                            Text = line,
+                            GameObject = wrapper,
+                            Latitude = latitude,
+                            Longitude = longitude,
+                            RelativeAltitude = altitude
+                        };
+                        var latDistance = Calc(arObject.Latitude, arObject.Longitude, _currentLatitude, arObject.Longitude);
+                        var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _currentLongitude);
 
                         var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
                         if (distance < 250)
@@ -252,9 +286,39 @@ public class AugmentedScript : MonoBehaviour
                     }
                     else
                     {
+                        // Get x offset and z offset of the object
+                        double value;
+                        if (!double.TryParse(parts[3].Trim(), out value))
+                        {
+                            _error = line + ", bad x: " + parts[3].Trim();
+                            break;
+                        }
+                        var xOffset = (float)value;
+
+                        if (!double.TryParse(parts[4].Trim(), out value))
+                        {
+                            _error = line + ", bad z: " + parts[4].Trim();
+                            break;
+                        }
+                        var zOffset = (float)value;
+
+                        if (!double.TryParse(parts[5].Trim(), out value))
+                        {
+                            _error = line + ", bad alt: " + parts[5].Trim();
+                            break;
+                        }
+                        var altitude = (float)value;
+
                         // Create the ar object
-                        var arObject = new ArObject { IsRelative = true, Text = line, GameObject = wrapper, Latitude = 0, Longitude = 0 };
+                        var arObject = new ArObject
+                        {
+                            IsRelative = true,
+                            Text = line,
+                            GameObject = wrapper,
+                            RelativeAltitude = altitude
+                        };
                         _arObjects.Add(arObject);
+                        arObject.GameObject.transform.position = arObject.TargetPosition = new Vector3(xOffset, arObject.RelativeAltitude, zOffset);
                     }
                 }
 
@@ -282,13 +346,39 @@ public class AugmentedScript : MonoBehaviour
             {
                 if (!arObject.IsRelative)
                 {
-                    var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
-                    var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
+                    var latDistance = Calc(arObject.Latitude, arObject.Longitude, _currentLatitude, arObject.Longitude);
+                    var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _currentLongitude);
 
-                    var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
-
+                    if (arObject.Latitude < _currentLatitude)
+                    {
+                        if (latDistance > 0)
+                        {
+                            latDistance *= -1;
+                        }
+                    }
+                    else
+                    {
+                        if (latDistance < 0)
+                        {
+                            latDistance *= -1;
+                        }
+                    }
+                    if (arObject.Longitude < _currentLongitude)
+                    {
+                        if (lonDistance > 0)
+                        {
+                            lonDistance *= -1;
+                        }
+                    }
+                    else
+                    {
+                        if (lonDistance < 0)
+                        {
+                            lonDistance *= -1;
+                        }
+                    }
                     // Set the target position of the object, this is where we lerp to in update
-                    arObject.TargetPosition = new Vector3(0, arObject.GameObject.transform.position.y, distance);
+                    arObject.TargetPosition = new Vector3(lonDistance, arObject.RelativeAltitude, latDistance);
                 }
             }
             yield return null;
@@ -313,7 +403,7 @@ public class AugmentedScript : MonoBehaviour
     void Start()
     {
         // Get references to objects
-        _infoTextObject = GameObject.FindGameObjectWithTag("distanceText");
+        _infoText = GameObject.FindGameObjectWithTag("distanceText");
         try
         {
             _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
@@ -340,67 +430,110 @@ public class AugmentedScript : MonoBehaviour
         StartCoroutine("GetCoordinates");
     }
 
+    private long _currentSecond = DateTime.Now.Ticks / 10000000L;
+    private int _fps = 1;
+    private int _fpcs = 0;
+
     void Update()
     {
-        // Set any error text on the canvas
-        if (!string.IsNullOrEmpty(_error) && _infoTextObject != null)
+        var second = DateTime.Now.Ticks / 10000000L;
+        if (_currentSecond == second)
         {
-            _infoTextObject.GetComponent<Text>().text = _error;
+            _fpcs++;
+        }
+        else
+        {
+            if (_currentSecond == second - 1)
+            {
+                _fps = _fpcs + 1;
+            }
+            else
+            {
+                _fps = 1;
+            }
+            _fpcs = 0;
+            _currentSecond = second;
+        }
+
+        // Set any error text on the canvas
+        if (!string.IsNullOrEmpty(_error) && _infoText != null)
+        {
+            _infoText.GetComponent<Text>().text = _error;
             return;
         }
 
         // Calculate heading
-        if (!((_currentHeading < 180 && _headingShown < 180) || (_currentHeading > 180 && _headingShown > 180)))
+        var currentHeading = _currentHeading;
+        if (Math.Abs(currentHeading - _headingShown) > 180)
         {
-            if (_currentHeading < 180)
+            if (currentHeading < _headingShown)
             {
-                _currentHeading += 360;
+                currentHeading += 360;
             }
             else
             {
                 _headingShown += 360;
             }
         }
-        _headingShown += (float)((_currentHeading - _headingShown) / 20.0);
-
+        _headingShown += (currentHeading - _headingShown) / (1 + _fps / 2);
         while (_headingShown > 360)
         {
             _headingShown -= 360;
         }
-
         _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+
+        float posDistancex = 0;
+        float posDistancey = 0;
+        float posDistancez = 0;
 
         // Place the ar objects
         foreach (var arObject in _arObjects)
         {
             if (!arObject.IsRelative)
             {
+                var targetPosition = arObject.TargetPosition;
+                posDistancex = targetPosition.x;
+                posDistancey = targetPosition.y;
+                posDistancez = targetPosition.z;
+
                 // Linearly interpolate from current position to target position
-                arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, arObject.TargetPosition, _speed);
+                arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, targetPosition, .5f / _fps);
+                arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+            }
+            else
+            {
+                var targetPosition = arObject.TargetPosition;
+                posDistancex = targetPosition.x;
+                posDistancey = targetPosition.y;
+                posDistancez = targetPosition.z;
                 arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
             }
         }
 
-        if (_infoTextObject != null)
+        if (_infoText != null)
         {
             // Set info text
             if (!_showInfo)
             {
-                _infoTextObject.GetComponent<Text>().text = string.Empty;
+                _infoText.GetComponent<Text>().text = string.Empty;
                 return;
             }
 
-            var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
-            var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
+            //var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
+            //var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
 
-            var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+            //var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
 
-            _infoTextObject.GetComponent<Text>().text =
-                "D " + distance.ToString("F")
-                + " N " + _arObjects.Count
-                + " Lat " + (_currentLatitude).ToString("F6")
-                + " Lon " + (_currentLongitude).ToString("F6")
-                + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");
+            _infoText.GetComponent<Text>().text =
+                "Z " + (posDistancez).ToString("F1")
+                + " X " + (posDistancex).ToString("F1")
+                //+ " Y " + (posDistancey).ToString("F1")
+                + " LA " + (_currentLatitude).ToString("F6")
+                + " LO " + (_currentLongitude).ToString("F6")
+                //+ " F " + _fps.ToString("F") 
+                + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled")
+                ;
+            // + " N " + _arObjects.Count
         }
     }
 }

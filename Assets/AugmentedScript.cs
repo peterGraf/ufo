@@ -31,6 +31,7 @@ using System.Collections;
 using UnityEngine.UI;
 using UnityEngine.Networking;
 using System.Collections.Generic;
+using System;
 
 public class ArObject
 {
@@ -39,6 +40,7 @@ public class ArObject
     public float Latitude;
     public float Longitude;
     public Vector3 TargetPosition;
+    public bool IsRelative;
 }
 
 public class AugmentedScript : MonoBehaviour
@@ -54,9 +56,10 @@ public class AugmentedScript : MonoBehaviour
     private GameObject _infoTextObject;
     private GameObject _wrapper;
 
-    private string _locationError = null;
+    private bool _showInfo = false;
+    private string _error = null;
 
-    private bool _setOriginalValues = true;
+    private bool _doInitialize = true;
 
     private const float _speed = .1f;
 
@@ -65,17 +68,17 @@ public class AugmentedScript : MonoBehaviour
     // A Coroutine retrieving the current location and heading
     private IEnumerator GetCoordinates()
     {
-        while (string.IsNullOrEmpty(_locationError))
+        while (string.IsNullOrEmpty(_error))
         {
-            // If original value has not yet been set save coordinates of player on app start
-            if (_setOriginalValues)
+            // Save location and retrieve objects to show on app start
+            if (_doInitialize)
             {
-                _setOriginalValues = false;
+                _doInitialize = false;
 
                 // Check if user has location service enabled
                 if (!Input.location.isEnabledByUser)
                 {
-                    _locationError = "Please enable the location service.";
+                    _error = "Please enable the location service.";
                     yield break;
                 }
 
@@ -96,19 +99,20 @@ public class AugmentedScript : MonoBehaviour
                 // Service didn't initialize in 30 seconds
                 if (maxWait < 1)
                 {
-                    _locationError = "Location service timed out.";
+                    _error = "Location service timed out.";
                     yield break;
                 }
 
                 // Connection has failed
                 if (Input.location.status == LocationServiceStatus.Failed)
                 {
-                    _locationError = "Unable to determine device location.";
+                    _error = "Unable to determine device location.";
                     yield break;
                 }
 
-                _originalLatitude = Input.location.lastData.latitude;
-                _originalLongitude = Input.location.lastData.longitude;
+                // Read location
+                _originalLatitude = _currentLatitude = Input.location.lastData.latitude;
+                _originalLongitude = _currentLongitude = Input.location.lastData.longitude;
 
                 // Get the list of objects to show and their locations
                 var url = "http://www.mission-base.com/ArvosVun.txt";
@@ -117,7 +121,7 @@ public class AugmentedScript : MonoBehaviour
 
                 if (www.isNetworkError || www.isHttpError)
                 {
-                    _locationError = www.error;
+                    _error = www.error;
                     yield break;
                 }
 
@@ -125,59 +129,83 @@ public class AugmentedScript : MonoBehaviour
                 var text = www.downloadHandler.text;
                 if (string.IsNullOrEmpty(text))
                 {
-                    _locationError = "WebRequest to url '" + url + "' received empty text.";
+                    _error = "WebRequest to url '" + url + "' received empty text.";
                     yield break;
                 }
 
                 // Place the objects
                 var lines = text.Split('\n');
-                foreach (var line in lines)
+                foreach (var entry in lines)
                 {
-                    if (string.IsNullOrEmpty(line))
+                    if (string.IsNullOrEmpty(entry))
                     {
+                        // Empty line, ignore
+                        continue;
+                    }
+                    var line = entry.Trim();
+                    if (string.IsNullOrEmpty(line) || line.StartsWith("#") || line.StartsWith("//"))
+                    {
+                        // Empty line or comment line, ignore
                         continue;
                     }
 
-                    string arGameObjectName;
-                    GameObject arGameObject;
+                    string arGameObjectTag;
+                    GameObject arGameObject = null;
 
                     var parts = line.Split(',');
                     if (parts.Length == 1)
                     {
+                        if ("ShowInfo".Equals(parts[0].Trim()))
+                        {
+                            _showInfo = true;
+                            continue;
+                        }
+
                         // Destroy the objects, so they are not visible in the scene
-                        arGameObjectName = parts[0];
-                        arGameObject = GameObject.FindGameObjectWithTag(arGameObjectName);
+                        arGameObjectTag = parts[0].Trim();
+                        try
+                        {
+                            arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
+                        }
+                        catch (Exception)
+                        { }
                         if (arGameObject == null)
                         {
-                            _locationError = "line '" + line + "', bad name: " + arGameObjectName;
-                            yield break;
+                            _error = "line '" + line + "', bad tag: " + arGameObjectTag;
+                            break;
                         }
                         Destroy(arGameObject, .1f);
                         continue;
                     }
 
+                    // 2 parts: Tag, Name to set
                     // 4 parts: Tag, Name to set, Lat, Lon
-                    if (parts.Length != 4)
+                    if (parts.Length != 4 && parts.Length != 2)
                     {
-                        _locationError = "line '" + line + "', bad text: " + text;
-                        yield break;
+                        _error = "line '" + line + "', bad text: " + text;
+                        break;
                     }
 
                     // First part is the tag of the game object
-                    arGameObjectName = parts[0];
-                    arGameObject = GameObject.FindGameObjectWithTag(arGameObjectName);
+                    arGameObjectTag = parts[0].Trim();
+                    try
+                    {
+                        arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
+                    }
+                    catch (Exception)
+                    { }
                     if (arGameObject == null)
                     {
-                        _locationError = "line '" + line + "', bad name: " + arGameObjectName;
-                        yield break;
+                        _error = "line '" + line + "', bad tag: " + arGameObjectTag;
+                        break;
                     }
 
                     // Wrap the object in a wrapper
                     var wrapper = Instantiate(_wrapper);
                     if (wrapper == null)
                     {
-                        _locationError = "Instantiate(_wrapper) failed";
-                        yield break;
+                        _error = "Instantiate(_wrapper) failed";
+                        break;
                     }
                     wrapper.transform.parent = _sceneAnchor.transform;
 
@@ -185,35 +213,59 @@ public class AugmentedScript : MonoBehaviour
                     arGameObject = Instantiate(arGameObject);
                     if (arGameObject == null)
                     {
-                        _locationError = "Instantiate(gameObject) failed";
-                        yield break;
+                        _error = "Instantiate(" + arGameObjectTag + ") failed";
+                        break;
                     }
                     arGameObject.transform.parent = wrapper.transform;
-                    arGameObject.name = parts[1];
 
-                    // Get lat and lon of the object
-                    double value;
-                    if (!double.TryParse(parts[2], out value))
+                    // Set the name of the instantiated game object
+                    arGameObject.name = parts[1].Trim();
+
+                    if (parts.Length == 4)
                     {
-                        _locationError = "line '" + line + "', bad lat: " + parts[2];
-                        yield break;
-                    }
-                    var latitude = (float)value;
+                        // Get lat and lon of the object
+                        double value;
+                        if (!double.TryParse(parts[2].Trim(), out value))
+                        {
+                            _error = "line '" + line + "', bad lat: " + parts[2].Trim();
+                            break;
+                        }
+                        var latitude = (float)value;
 
-                    if (!double.TryParse(parts[3], out value))
+                        if (!double.TryParse(parts[3].Trim(), out value))
+                        {
+                            _error = "line '" + line + "', bad lon: " + parts[3].Trim();
+                            break;
+                        }
+                        var longitude = (float)value;
+
+                        // Create the ar object
+                        var arObject = new ArObject { IsRelative = false, Text = line, GameObject = wrapper, Latitude = latitude, Longitude = longitude };
+                        var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
+                        var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
+
+                        var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+                        if (distance < 250)
+                        {
+                            _arObjects.Add(arObject);
+                        }
+                    }
+                    else
                     {
-                        _locationError = "line '" + line + "', bad lon: " + parts[3];
-                        yield break;
+                        // Create the ar object
+                        var arObject = new ArObject { IsRelative = true, Text = line, GameObject = wrapper, Latitude = 0, Longitude = 0 };
+                        _arObjects.Add(arObject);
                     }
-                    var longitude = (float)value;
-
-                    // Create the ar object
-                    var arObject = new ArObject { Text = line, GameObject = wrapper, Latitude = latitude, Longitude = longitude };
-                    _arObjects.Add(arObject);
                 }
 
-                if (!string.IsNullOrEmpty(_locationError))
+                if (!string.IsNullOrEmpty(_error))
                 {
+                    yield break;
+                }
+
+                if (_arObjects.Count == 0)
+                {
+                    _error = "Sorry, there are no augments at your location!";
                     yield break;
                 }
             }
@@ -228,16 +280,20 @@ public class AugmentedScript : MonoBehaviour
             // Calculate positions for all ar objects
             foreach (var arObject in _arObjects)
             {
-                var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
-                var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
+                if (!arObject.IsRelative)
+                {
+                    var latDistance = Calc(arObject.Latitude, _currentLongitude, _currentLatitude, _currentLongitude);
+                    var lonDistance = Calc(_currentLatitude, arObject.Longitude, _currentLatitude, _currentLongitude);
 
-                var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+                    var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
 
-                // Set the target position of the object, this is where we lerp to in update
-                arObject.TargetPosition = new Vector3(0, arObject.GameObject.transform.position.y, distance);
+                    // Set the target position of the object, this is where we lerp to in update
+                    arObject.TargetPosition = new Vector3(0, arObject.GameObject.transform.position.y, distance);
+                }
             }
             yield return null;
         }
+        yield return null;
     }
 
     // Calculates the distance between two sets of coordinates, taking into account the curvature of the earth
@@ -258,21 +314,26 @@ public class AugmentedScript : MonoBehaviour
     {
         // Get references to objects
         _infoTextObject = GameObject.FindGameObjectWithTag("distanceText");
-        if (_infoTextObject == null)
+        try
         {
-            _locationError = "Cannot find object with tag distanceText";
+            _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
         }
-
-        _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
+        catch (Exception)
+        { }
         if (_sceneAnchor == null)
         {
-            _locationError = "Cannot find object with tag SceneAnchor";
+            _error = "Cannot find object with tag SceneAnchor";
         }
 
-        _wrapper = GameObject.FindGameObjectWithTag("Wrapper");
+        try
+        {
+            _wrapper = GameObject.FindGameObjectWithTag("Wrapper");
+        }
+        catch (Exception)
+        { }
         if (_wrapper == null)
         {
-            _locationError = "Cannot find object with tag Wrapper";
+            _error = "Cannot find object with tag Wrapper";
         }
 
         // Start GetCoordinate() function 
@@ -282,9 +343,9 @@ public class AugmentedScript : MonoBehaviour
     void Update()
     {
         // Set any error text on the canvas
-        if (!string.IsNullOrEmpty(_locationError))
+        if (!string.IsNullOrEmpty(_error) && _infoTextObject != null)
         {
-            _infoTextObject.GetComponent<Text>().text = _locationError;
+            _infoTextObject.GetComponent<Text>().text = _error;
             return;
         }
 
@@ -312,22 +373,34 @@ public class AugmentedScript : MonoBehaviour
         // Place the ar objects
         foreach (var arObject in _arObjects)
         {
-            // Linearly interpolate from current position to target position
-            arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, arObject.TargetPosition, _speed);
-            arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+            if (!arObject.IsRelative)
+            {
+                // Linearly interpolate from current position to target position
+                arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, arObject.TargetPosition, _speed);
+                arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+            }
         }
 
-        // Set info text
-        var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
-        var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
+        if (_infoTextObject != null)
+        {
+            // Set info text
+            if (!_showInfo)
+            {
+                _infoTextObject.GetComponent<Text>().text = string.Empty;
+                return;
+            }
 
-        var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+            var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
+            var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
 
-        _infoTextObject.GetComponent<Text>().text =
-            "D " + distance.ToString("F")
-            + " N " + _arObjects.Count
-            + " Lat " + (_currentLatitude).ToString("F6")
-            + " Lon " + (_currentLongitude).ToString("F6")
-            + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");
+            var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+
+            _infoTextObject.GetComponent<Text>().text =
+                "D " + distance.ToString("F")
+                + " N " + _arObjects.Count
+                + " Lat " + (_currentLatitude).ToString("F6")
+                + " Lon " + (_currentLongitude).ToString("F6")
+                + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled");
+        }
     }
 }

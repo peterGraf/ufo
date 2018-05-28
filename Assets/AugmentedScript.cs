@@ -64,12 +64,17 @@ public class AugmentedScript : MonoBehaviour
 
     private List<ArObject> _arObjects = new List<ArObject>();
 
+    private float _initialHeading = 0;
+    private float _initialCameraAngle = 0;
+    private long _startSecond = 0;
+    private bool _cameraIsInitializing = true;
+
     // A Coroutine retrieving the current location and heading
     private IEnumerator GetCoordinates()
     {
         while (string.IsNullOrEmpty(_error))
         {
-            // Save location and retrieve objects to show on app start
+            // On app start save location and heading and retrieve objects to show 
             if (_doInitialize)
             {
                 _doInitialize = false;
@@ -114,7 +119,15 @@ public class AugmentedScript : MonoBehaviour
                 _originalLongitude = _currentLongitude = Input.location.lastData.longitude;
 
                 // Get the list of objects to show and their locations
-                var url = "http://www.mission-base.com/ArvosVun.txt";
+                var url = "http://www.mission-base.com/ArvosVun.txt"
+                    + "?version=1"
+                    + "&lat=" + _originalLatitude.ToString("F6")
+                    + "&lon=" + _originalLongitude.ToString("F6")
+                    + "&version=1"
+                    + "&channel=ArvosVun"
+                    + "&device=" + SystemInfo.deviceUniqueIdentifier
+                    ;
+
                 UnityWebRequest www = UnityWebRequest.Get(url);
                 yield return www.SendWebRequest();
 
@@ -332,11 +345,24 @@ public class AugmentedScript : MonoBehaviour
                     _error = "Sorry, there are no augments at your location!";
                     yield break;
                 }
+                _initialHeading = Input.compass.trueHeading;
+                _headingShown = Input.compass.trueHeading;
+                _startSecond = DateTime.Now.Ticks / 10000000;
             }
 
             // Overwrite current lat and lon everytime
             _currentLatitude = Input.location.lastData.latitude;
             _currentLongitude = Input.location.lastData.longitude;
+
+            // For the first 5 seconds we remember the initial camera heading
+            if (_cameraIsInitializing)
+            {
+                if (DateTime.Now.Ticks / 10000000 > _startSecond + 5)
+                {
+                    _initialCameraAngle = _sceneAnchor.transform.parent.eulerAngles.y;
+                    _cameraIsInitializing = false;
+                }
+            }
 
             // Get the heading from the compass
             _currentHeading = Input.compass.trueHeading;
@@ -431,7 +457,7 @@ public class AugmentedScript : MonoBehaviour
     }
 
     private long _currentSecond = DateTime.Now.Ticks / 10000000L;
-    private int _fps = 1;
+    private int _fps = 30;
     private int _fpcs = 0;
 
     void Update()
@@ -480,7 +506,13 @@ public class AugmentedScript : MonoBehaviour
         {
             _headingShown -= 360;
         }
-        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+
+        if (_cameraIsInitializing)
+        {
+            _initialCameraAngle = _sceneAnchor.transform.parent.eulerAngles.y;
+            _initialHeading = _headingShown;
+        }
+        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
 
         float posDistancex = 0;
         float posDistancey = 0;
@@ -497,8 +529,8 @@ public class AugmentedScript : MonoBehaviour
                 posDistancez = targetPosition.z;
 
                 // Linearly interpolate from current position to target position
-                arObject.GameObject.transform.position = Vector3.Lerp(arObject.GameObject.transform.position, targetPosition, .5f / _fps);
-                arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
+                var position = Vector3.Lerp(arObject.GameObject.transform.position, targetPosition, .5f / _fps);
+                arObject.GameObject.transform.position = position;
             }
             else
             {
@@ -506,8 +538,8 @@ public class AugmentedScript : MonoBehaviour
                 posDistancex = targetPosition.x;
                 posDistancey = targetPosition.y;
                 posDistancez = targetPosition.z;
-                arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _headingShown, 0);
             }
+            arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
         }
 
         if (_infoText != null)
@@ -531,7 +563,9 @@ public class AugmentedScript : MonoBehaviour
                 + " LA " + (_currentLatitude).ToString("F6")
                 + " LO " + (_currentLongitude).ToString("F6")
                 //+ " F " + _fps.ToString("F") 
-                + " H " + (Input.compass.enabled ? _headingShown.ToString("F") : "disabled")
+                //+ " C " + _sceneAnchor.transform.parent.eulerAngles.y.ToString("F")
+                //+ " SA " + _sceneAnchor.transform.eulerAngles.y.ToString("F")
+                + " H " + _headingShown.ToString("F")
                 ;
             // + " N " + _arObjects.Count
         }

@@ -184,12 +184,7 @@ public class AugmentedScript : MonoBehaviour
                         {
                             // Destroy the objects, so they are not visible in the scene
                             arGameObjectTag = parts[1].Trim();
-                            try
-                            {
-                                arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
-                            }
-                            catch (Exception)
-                            { }
+                            arGameObject = FindGameObjectWithTag(arGameObjectTag);
                             if (arGameObject == null)
                             {
                                 _error = line + ", bad tag: " + arGameObjectTag;
@@ -220,12 +215,8 @@ public class AugmentedScript : MonoBehaviour
 
                     // First part is the tag of the game object
                     arGameObjectTag = parts[1].Trim();
-                    try
-                    {
-                        arGameObject = GameObject.FindGameObjectWithTag(arGameObjectTag);
-                    }
-                    catch (Exception)
-                    { }
+
+                    arGameObject = FindGameObjectWithTag(arGameObjectTag);
                     if (arGameObject == null)
                     {
                         _error = "line '" + line + "', bad tag: " + arGameObjectTag;
@@ -426,27 +417,29 @@ public class AugmentedScript : MonoBehaviour
         return (float)(distance * 1000f); // meters
     }
 
+    private GameObject FindGameObjectWithTag(string tag)
+    {
+        try
+        {
+            return GameObject.FindGameObjectWithTag(tag);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
     void Start()
     {
         // Get references to objects
         _infoText = GameObject.FindGameObjectWithTag("distanceText");
-        try
-        {
-            _sceneAnchor = GameObject.FindGameObjectWithTag("SceneAnchor");
-        }
-        catch (Exception)
-        { }
+
+        _sceneAnchor = FindGameObjectWithTag("SceneAnchor");
         if (_sceneAnchor == null)
         {
             _error = "Cannot find object with tag SceneAnchor";
         }
 
-        try
-        {
-            _wrapper = GameObject.FindGameObjectWithTag("Wrapper");
-        }
-        catch (Exception)
-        { }
+        _wrapper = FindGameObjectWithTag("Wrapper");
         if (_wrapper == null)
         {
             _error = "Cannot find object with tag Wrapper";
@@ -560,11 +553,11 @@ public class AugmentedScript : MonoBehaviour
                 "Z " + (posDistancez).ToString("F1")
                 + " X " + (posDistancex).ToString("F1")
                 //+ " Y " + (posDistancey).ToString("F1")
-                + " LA " + (_currentLatitude).ToString("F6")
-                + " LO " + (_currentLongitude).ToString("F6")
+                //+ " LA " + (_currentLatitude).ToString("F6")
+                //+ " LO " + (_currentLongitude).ToString("F6")
                 //+ " F " + _fps.ToString("F") 
-                //+ " C " + _sceneAnchor.transform.parent.eulerAngles.y.ToString("F")
-                //+ " SA " + _sceneAnchor.transform.eulerAngles.y.ToString("F")
+                + " C " + _sceneAnchor.transform.parent.eulerAngles.y.ToString("F")
+                + " SA " + _sceneAnchor.transform.eulerAngles.y.ToString("F")
                 + " H " + _headingShown.ToString("F")
                 ;
             // + " N " + _arObjects.Count

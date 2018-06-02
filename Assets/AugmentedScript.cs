@@ -67,11 +67,254 @@ public class AugmentedScript : MonoBehaviour
 
     private List<ArObject> _arObjects = new List<ArObject>();
 
+    private float _initialCameraAngle = 0;
     private float _initialHeading = 0;
     private long _startSecond = 0;
     private bool _cameraIsInitializing = true;
 
-    // A Coroutine retrieving the current location and heading
+    // Create the ar objects depending on the downloaded text
+    private void CreateArObjects(string text)
+    {
+        // Place the objects
+        var lines = text.Split('\n');
+        foreach (var entry in lines)
+        {
+            if (string.IsNullOrEmpty(entry))
+            {
+                // Empty line, ignore
+                continue;
+            }
+            var line = entry.Trim();
+            if (string.IsNullOrEmpty(line) || line.StartsWith("#") || line.StartsWith("//"))
+            {
+                // Empty line or comment line, ignore
+                continue;
+            }
+
+            string arGameObjectTag;
+            GameObject arGameObject = null;
+
+            var parts = line.Split(',');
+            if (parts.Length == 1)
+            {
+                if ("ShowInfo".Equals(parts[0].Trim()))
+                {
+                    _showInfo = true;
+                    continue;
+                }
+                else
+                {
+                    _error = line + "', bad command: " + parts[0].Trim();
+                    break;
+                }
+            }
+            if (parts.Length == 2)
+            {
+                if ("DEL".Equals(parts[0].Trim()))
+                {
+                    // Destroy the objects, so they are not visible in the scene
+                    arGameObjectTag = parts[1].Trim();
+                    arGameObject = FindGameObjectWithTag(arGameObjectTag);
+                    if (arGameObject == null)
+                    {
+                        _error = line + ", bad tag: " + arGameObjectTag;
+                        break;
+                    }
+                    Destroy(arGameObject, .1f);
+                    continue;
+                }
+                else
+                {
+                    _error = line + ", bad command: " + parts[0].Trim();
+                    break;
+                }
+            }
+
+            // 6 parts: Command,Tag, Name to set, Lat, Lon, alt
+            if (parts.Length != 6)
+            {
+                _error = line + ", bad text: ";
+                break;
+            }
+
+            if (!"REL".Equals(parts[0].Trim()) && !"ABS".Equals(parts[0].Trim()))
+            {
+                _error = line + ", bad command: " + parts[0].Trim();
+                break;
+            }
+
+            // First part is the tag of the game object
+            arGameObjectTag = parts[1].Trim();
+
+            arGameObject = FindGameObjectWithTag(arGameObjectTag);
+            if (arGameObject == null)
+            {
+                _error = line + ", bad tag: '" + arGameObjectTag + "'";
+                break;
+            }
+
+            // Wrap the object in a wrapper
+            var wrapper = Instantiate(_wrapper);
+            if (wrapper == null)
+            {
+                _error = "Instantiate(_wrapper) failed";
+                break;
+            }
+            wrapper.transform.parent = _sceneAnchor.transform;
+
+            // Create a copy of the object
+            arGameObject = Instantiate(arGameObject);
+            if (arGameObject == null)
+            {
+                _error = "Instantiate(" + arGameObjectTag + ") failed";
+                break;
+            }
+            arGameObject.transform.parent = wrapper.transform;
+
+            // Set the name of the instantiated game object
+            arGameObject.name = parts[2].Trim();
+
+            if ("ABS".Equals(parts[0].Trim()))
+            {
+                // Get lat and lon of the object
+                double value;
+                if (!double.TryParse(parts[3].Trim(), out value))
+                {
+                    _error = line + ", bad lat: " + parts[3].Trim();
+                    break;
+                }
+                var latitude = (float)value;
+
+                if (!double.TryParse(parts[4].Trim(), out value))
+                {
+                    _error = line + ", bad lon: " + parts[4].Trim();
+                    break;
+                }
+                var longitude = (float)value;
+
+                if (!double.TryParse(parts[5].Trim(), out value))
+                {
+                    _error = line + ", bad alt: " + parts[5].Trim();
+                    break;
+                }
+                var altitude = (float)value;
+
+                // Create the AR object
+                var arObject = new ArObject
+                {
+                    IsRelative = false,
+                    Text = line,
+                    GameObject = wrapper,
+                    Latitude = latitude,
+                    Longitude = longitude,
+                    RelativeAltitude = altitude
+                };
+
+                // Latitude or longitude 0 means objects should take device latitude or longitude
+                var arObjectLatitude = arObject.Latitude;
+                if(arObjectLatitude == 0f)
+                {
+                    arObjectLatitude = _originalLatitude;
+                }
+                var arObjectLongitude = arObject.Longitude;
+                if(arObjectLongitude == 0f)
+                {
+                    arObjectLongitude = _originalLongitude;
+                }
+
+                var latDistance = Calc(arObjectLatitude, arObjectLongitude, _originalLatitude, arObjectLongitude);
+                var lonDistance = Calc(arObjectLatitude, arObjectLongitude, arObjectLatitude, _originalLongitude);
+
+                var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
+                if (distance < 250)
+                {
+                    _arObjects.Add(arObject);
+                }
+            }
+            else
+            {
+                // Get x offset and z offset of the object
+                double value;
+                if (!double.TryParse(parts[3].Trim(), out value))
+                {
+                    _error = line + ", bad x: " + parts[3].Trim();
+                    break;
+                }
+                var xOffset = (float)value;
+
+                if (!double.TryParse(parts[4].Trim(), out value))
+                {
+                    _error = line + ", bad z: " + parts[4].Trim();
+                    break;
+                }
+                var zOffset = (float)value;
+
+                if (!double.TryParse(parts[5].Trim(), out value))
+                {
+                    _error = line + ", bad alt: " + parts[5].Trim();
+                    break;
+                }
+                var altitude = (float)value;
+
+                // Create the ar object
+                var arObject = new ArObject
+                {
+                    IsRelative = true,
+                    Text = line,
+                    GameObject = wrapper,
+                    RelativeAltitude = altitude
+                };
+                _arObjects.Add(arObject);
+                arObject.GameObject.transform.position = arObject.TargetPosition = new Vector3(xOffset, arObject.RelativeAltitude, zOffset);
+            }
+        }
+    }
+
+    // Calculate positions for all ar objects
+    private void PlaceArObjects()
+    {
+        foreach (var arObject in _arObjects)
+        {
+            if (!arObject.IsRelative)
+            {
+                var latDistance = arObject.Latitude == 0F ? 0F : Calc(arObject.Latitude, arObject.Longitude, _currentLatitude, arObject.Longitude);
+                var lonDistance = arObject.Longitude == 0F ? 0F : Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _currentLongitude);
+
+                if (arObject.Latitude < _currentLatitude)
+                {
+                    if (latDistance > 0)
+                    {
+                        latDistance *= -1;
+                    }
+                }
+                else
+                {
+                    if (latDistance < 0)
+                    {
+                        latDistance *= -1;
+                    }
+                }
+                if (arObject.Longitude < _currentLongitude)
+                {
+                    if (lonDistance > 0)
+                    {
+                        lonDistance *= -1;
+                    }
+                }
+                else
+                {
+                    if (lonDistance < 0)
+                    {
+                        lonDistance *= -1;
+                    }
+                }
+                // Set the target position of the object, this is where we lerp to in update
+                arObject.TargetPosition = new Vector3(lonDistance, arObject.RelativeAltitude, latDistance);
+            }
+        }
+    }
+
+    // A Coroutine retrieving the object locations and the current location and heading
     private IEnumerator GetCoordinates()
     {
         while (string.IsNullOrEmpty(_error))
@@ -147,187 +390,8 @@ public class AugmentedScript : MonoBehaviour
                     yield break;
                 }
 
-                // Place the objects
-                var lines = text.Split('\n');
-                foreach (var entry in lines)
-                {
-                    if (string.IsNullOrEmpty(entry))
-                    {
-                        // Empty line, ignore
-                        continue;
-                    }
-                    var line = entry.Trim();
-                    if (string.IsNullOrEmpty(line) || line.StartsWith("#") || line.StartsWith("//"))
-                    {
-                        // Empty line or comment line, ignore
-                        continue;
-                    }
-
-                    string arGameObjectTag;
-                    GameObject arGameObject = null;
-
-                    var parts = line.Split(',');
-                    if (parts.Length == 1)
-                    {
-                        if ("ShowInfo".Equals(parts[0].Trim()))
-                        {
-                            _showInfo = true;
-                            continue;
-                        }
-                        else
-                        {
-                            _error = line + "', bad command: " + parts[0].Trim();
-                            break;
-                        }
-                    }
-                    if (parts.Length == 2)
-                    {
-                        if ("DEL".Equals(parts[0].Trim()))
-                        {
-                            // Destroy the objects, so they are not visible in the scene
-                            arGameObjectTag = parts[1].Trim();
-                            arGameObject = FindGameObjectWithTag(arGameObjectTag);
-                            if (arGameObject == null)
-                            {
-                                _error = line + ", bad tag: " + arGameObjectTag;
-                                break;
-                            }
-                            Destroy(arGameObject, .1f);
-                            continue;
-                        }
-                        else
-                        {
-                            _error = line + ", bad command: " + parts[0].Trim();
-                            break;
-                        }
-                    }
-
-                    // 6 parts: Command,Tag, Name to set, Lat, Lon, alt
-                    if (parts.Length != 6)
-                    {
-                        _error = line + ", bad text: ";
-                        break;
-                    }
-
-                    if (!"REL".Equals(parts[0].Trim()) && !"ABS".Equals(parts[0].Trim()))
-                    {
-                        _error = line + ", bad command: " + parts[0].Trim();
-                        break;
-                    }
-
-                    // First part is the tag of the game object
-                    arGameObjectTag = parts[1].Trim();
-
-                    arGameObject = FindGameObjectWithTag(arGameObjectTag);
-                    if (arGameObject == null)
-                    {
-                        _error = "line '" + line + "', bad tag: " + arGameObjectTag;
-                        break;
-                    }
-
-                    // Wrap the object in a wrapper
-                    var wrapper = Instantiate(_wrapper);
-                    if (wrapper == null)
-                    {
-                        _error = "Instantiate(_wrapper) failed";
-                        break;
-                    }
-                    wrapper.transform.parent = _sceneAnchor.transform;
-
-                    // Create a copy of the object
-                    arGameObject = Instantiate(arGameObject);
-                    if (arGameObject == null)
-                    {
-                        _error = "Instantiate(" + arGameObjectTag + ") failed";
-                        break;
-                    }
-                    arGameObject.transform.parent = wrapper.transform;
-
-                    // Set the name of the instantiated game object
-                    arGameObject.name = parts[2].Trim();
-
-                    if ("ABS".Equals(parts[0].Trim()))
-                    {
-                        // Get lat and lon of the object
-                        double value;
-                        if (!double.TryParse(parts[3].Trim(), out value))
-                        {
-                            _error = line + ", bad lat: " + parts[3].Trim();
-                            break;
-                        }
-                        var latitude = (float)value;
-
-                        if (!double.TryParse(parts[4].Trim(), out value))
-                        {
-                            _error = line + ", bad lon: " + parts[4].Trim();
-                            break;
-                        }
-                        var longitude = (float)value;
-
-                        if (!double.TryParse(parts[5].Trim(), out value))
-                        {
-                            _error = line + ", bad alt: " + parts[5].Trim();
-                            break;
-                        }
-                        var altitude = (float)value;
-
-                        // Create the ar object
-                        var arObject = new ArObject
-                        {
-                            IsRelative = false,
-                            Text = line,
-                            GameObject = wrapper,
-                            Latitude = latitude,
-                            Longitude = longitude,
-                            RelativeAltitude = altitude
-                        };
-                        var latDistance = Calc(arObject.Latitude, arObject.Longitude, _originalLatitude, arObject.Longitude);
-                        var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _originalLongitude);
-
-                        var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
-                        if (distance < 250)
-                        {
-                            _arObjects.Add(arObject);
-                        }
-                    }
-                    else
-                    {
-                        // Get x offset and z offset of the object
-                        double value;
-                        if (!double.TryParse(parts[3].Trim(), out value))
-                        {
-                            _error = line + ", bad x: " + parts[3].Trim();
-                            break;
-                        }
-                        var xOffset = (float)value;
-
-                        if (!double.TryParse(parts[4].Trim(), out value))
-                        {
-                            _error = line + ", bad z: " + parts[4].Trim();
-                            break;
-                        }
-                        var zOffset = (float)value;
-
-                        if (!double.TryParse(parts[5].Trim(), out value))
-                        {
-                            _error = line + ", bad alt: " + parts[5].Trim();
-                            break;
-                        }
-                        var altitude = (float)value;
-
-                        // Create the ar object
-                        var arObject = new ArObject
-                        {
-                            IsRelative = true,
-                            Text = line,
-                            GameObject = wrapper,
-                            RelativeAltitude = altitude
-                        };
-                        _arObjects.Add(arObject);
-                        arObject.GameObject.transform.position = arObject.TargetPosition = new Vector3(xOffset, arObject.RelativeAltitude, zOffset);
-                    }
-                }
-
+                // Create the objects
+                CreateArObjects(text);
                 if (!string.IsNullOrEmpty(_error))
                 {
                     yield break;
@@ -357,45 +421,7 @@ public class AugmentedScript : MonoBehaviour
             _currentLongitude = Input.location.lastData.longitude;
 
             // Calculate positions for all ar objects
-            foreach (var arObject in _arObjects)
-            {
-                if (!arObject.IsRelative)
-                {
-                    var latDistance = Calc(arObject.Latitude, arObject.Longitude, _currentLatitude, arObject.Longitude);
-                    var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _currentLongitude);
-
-                    if (arObject.Latitude < _currentLatitude)
-                    {
-                        if (latDistance > 0)
-                        {
-                            latDistance *= -1;
-                        }
-                    }
-                    else
-                    {
-                        if (latDistance < 0)
-                        {
-                            latDistance *= -1;
-                        }
-                    }
-                    if (arObject.Longitude < _currentLongitude)
-                    {
-                        if (lonDistance > 0)
-                        {
-                            lonDistance *= -1;
-                        }
-                    }
-                    else
-                    {
-                        if (lonDistance < 0)
-                        {
-                            lonDistance *= -1;
-                        }
-                    }
-                    // Set the target position of the object, this is where we lerp to in update
-                    arObject.TargetPosition = new Vector3(lonDistance, arObject.RelativeAltitude, latDistance);
-                }
-            }
+            PlaceArObjects();
 
             // Get the heading from the compass
             _currentHeading = Input.compass.trueHeading;
@@ -523,6 +549,7 @@ public class AugmentedScript : MonoBehaviour
         if (_cameraIsInitializing)
         {
             _initialHeading = _headingShown;
+            _initialCameraAngle = _cameraTransform.eulerAngles.y;
             foreach (var arObject in _arObjects)
             {
                 arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
@@ -539,12 +566,14 @@ public class AugmentedScript : MonoBehaviour
             }
 
             _infoText.GetComponent<Text>().text =
-                "Z " + GetTarketPosition(_arObjects.LastOrDefault()).z.ToString("F1")
-                + " X " + GetTarketPosition(_arObjects.LastOrDefault()).x.ToString("F1")
+                ""
+                //+ "Z " + GetTarketPosition(_arObjects.LastOrDefault()).z.ToString("F1")
+                //+ " X " + GetTarketPosition(_arObjects.LastOrDefault()).x.ToString("F1")
                 //+ " Y " + (GetTarketPosition(_arObjects.LastOrDefault()).y.ToString("F1")
                 //+ " LA " + (_currentLatitude).ToString("F6")
                 //+ " LO " + (_currentLongitude).ToString("F6")
                 //+ " F " + _fps.ToString("F") 
+                + "IC " + _initialCameraAngle.ToString("F")
                 + " C " + _cameraTransform.eulerAngles.y.ToString("F")
                 + " SA " + _sceneAnchor.transform.eulerAngles.y.ToString("F")
                 + " H " + _headingShown.ToString("F")

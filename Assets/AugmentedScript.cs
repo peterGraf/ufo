@@ -32,6 +32,7 @@ using UnityEngine.UI;
 using UnityEngine.Networking;
 using System.Collections.Generic;
 using System;
+using System.Linq;
 
 public class ArObject
 {
@@ -49,10 +50,12 @@ public class AugmentedScript : MonoBehaviour
     private float _currentLongitude = 0;
     private float _currentLatitude = 0;
     private float _currentHeading = 0;
+
     private float _originalLatitude = 0;
     private float _originalLongitude = 0;
     private float _headingShown = 0;
 
+    private Transform _cameraTransform = null;
     private GameObject _sceneAnchor = null;
     private GameObject _infoText = null;
     private GameObject _wrapper = null;
@@ -65,7 +68,6 @@ public class AugmentedScript : MonoBehaviour
     private List<ArObject> _arObjects = new List<ArObject>();
 
     private float _initialHeading = 0;
-    private float _initialCameraAngle = 0;
     private long _startSecond = 0;
     private bool _cameraIsInitializing = true;
 
@@ -115,8 +117,8 @@ public class AugmentedScript : MonoBehaviour
                 }
 
                 // Read location
-                _originalLatitude = _currentLatitude = Input.location.lastData.latitude;
-                _originalLongitude = _currentLongitude = Input.location.lastData.longitude;
+                _originalLatitude = Input.location.lastData.latitude;
+                _originalLongitude = Input.location.lastData.longitude;
 
                 // Get the list of objects to show and their locations
                 var url = "http://www.mission-base.com/ArvosVun.txt"
@@ -279,8 +281,8 @@ public class AugmentedScript : MonoBehaviour
                             Longitude = longitude,
                             RelativeAltitude = altitude
                         };
-                        var latDistance = Calc(arObject.Latitude, arObject.Longitude, _currentLatitude, arObject.Longitude);
-                        var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _currentLongitude);
+                        var latDistance = Calc(arObject.Latitude, arObject.Longitude, _originalLatitude, arObject.Longitude);
+                        var lonDistance = Calc(arObject.Latitude, arObject.Longitude, arObject.Latitude, _originalLongitude);
 
                         var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
                         if (distance < 250)
@@ -336,27 +338,23 @@ public class AugmentedScript : MonoBehaviour
                     _error = "Sorry, there are no augments at your location!";
                     yield break;
                 }
+                _startSecond = DateTime.Now.Ticks / 10000000;
                 _initialHeading = Input.compass.trueHeading;
                 _headingShown = Input.compass.trueHeading;
-                _startSecond = DateTime.Now.Ticks / 10000000;
+            }
+
+            // For the first N seconds we remember the initial camera heading
+            if (_cameraIsInitializing)
+            {
+                if (DateTime.Now.Ticks / 10000000 > _startSecond + 2)
+                {
+                    _cameraIsInitializing = false;
+                }
             }
 
             // Overwrite current lat and lon everytime
             _currentLatitude = Input.location.lastData.latitude;
             _currentLongitude = Input.location.lastData.longitude;
-
-            // For the first 5 seconds we remember the initial camera heading
-            if (_cameraIsInitializing)
-            {
-                if (DateTime.Now.Ticks / 10000000 > _startSecond + 5)
-                {
-                    _initialCameraAngle = _sceneAnchor.transform.parent.eulerAngles.y;
-                    _cameraIsInitializing = false;
-                }
-            }
-
-            // Get the heading from the compass
-            _currentHeading = Input.compass.trueHeading;
 
             // Calculate positions for all ar objects
             foreach (var arObject in _arObjects)
@@ -398,6 +396,10 @@ public class AugmentedScript : MonoBehaviour
                     arObject.TargetPosition = new Vector3(lonDistance, arObject.RelativeAltitude, latDistance);
                 }
             }
+
+            // Get the heading from the compass
+            _currentHeading = Input.compass.trueHeading;
+
             yield return null;
         }
         yield return null;
@@ -428,6 +430,7 @@ public class AugmentedScript : MonoBehaviour
             return null;
         }
     }
+
     void Start()
     {
         // Get references to objects
@@ -437,13 +440,16 @@ public class AugmentedScript : MonoBehaviour
         if (_sceneAnchor == null)
         {
             _error = "Cannot find object with tag SceneAnchor";
+            return;
         }
 
         _wrapper = FindGameObjectWithTag("Wrapper");
         if (_wrapper == null)
         {
             _error = "Cannot find object with tag Wrapper";
+            return;
         }
+        _cameraTransform = _wrapper.transform.parent;
 
         // Start GetCoordinate() function 
         StartCoroutine("GetCoordinates");
@@ -494,45 +500,33 @@ public class AugmentedScript : MonoBehaviour
                 _headingShown += 360;
             }
         }
-        _headingShown += (currentHeading - _headingShown) / (1 + _fps / 2);
+        _headingShown += (currentHeading - _headingShown) / 10; //  (1 + _fps / 2);
         while (_headingShown > 360)
         {
             _headingShown -= 360;
         }
 
-        if (_cameraIsInitializing)
-        {
-            _initialCameraAngle = _sceneAnchor.transform.parent.eulerAngles.y;
-            _initialHeading = _headingShown;
-        }
-        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
-
-        float posDistancex = 0;
-        float posDistancey = 0;
-        float posDistancez = 0;
-
         // Place the ar objects
+        _sceneAnchor.transform.eulerAngles = new Vector3(0, 0, 0);
         foreach (var arObject in _arObjects)
         {
             if (!arObject.IsRelative)
             {
-                var targetPosition = arObject.TargetPosition;
-                posDistancex = targetPosition.x;
-                posDistancey = targetPosition.y;
-                posDistancez = targetPosition.z;
-
                 // Linearly interpolate from current position to target position
-                var position = Vector3.Lerp(arObject.GameObject.transform.position, targetPosition, .5f / _fps);
+                var position = Vector3.Lerp(arObject.GameObject.transform.position, arObject.TargetPosition, .5f / _fps);
                 arObject.GameObject.transform.position = position;
             }
-            else
+        }
+        _sceneAnchor.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
+
+        // Turn the ar objects
+        if (_cameraIsInitializing)
+        {
+            _initialHeading = _headingShown;
+            foreach (var arObject in _arObjects)
             {
-                var targetPosition = arObject.TargetPosition;
-                posDistancex = targetPosition.x;
-                posDistancey = targetPosition.y;
-                posDistancez = targetPosition.z;
+                arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
             }
-            arObject.GameObject.transform.eulerAngles = new Vector3(0, 360 - _initialHeading, 0);
         }
 
         if (_infoText != null)
@@ -544,23 +538,28 @@ public class AugmentedScript : MonoBehaviour
                 return;
             }
 
-            //var latDistance = Calc(_originalLatitude, _currentLongitude, _currentLatitude, _currentLongitude);
-            //var lonDistance = Calc(_currentLatitude, _originalLongitude, _currentLatitude, _currentLongitude);
-
-            //var distance = Mathf.Sqrt(latDistance * latDistance + lonDistance * lonDistance);
-
             _infoText.GetComponent<Text>().text =
-                "Z " + (posDistancez).ToString("F1")
-                + " X " + (posDistancex).ToString("F1")
-                //+ " Y " + (posDistancey).ToString("F1")
+                "Z " + GetTarketPosition(_arObjects.LastOrDefault()).z.ToString("F1")
+                + " X " + GetTarketPosition(_arObjects.LastOrDefault()).x.ToString("F1")
+                //+ " Y " + (GetTarketPosition(_arObjects.LastOrDefault()).y.ToString("F1")
                 //+ " LA " + (_currentLatitude).ToString("F6")
                 //+ " LO " + (_currentLongitude).ToString("F6")
                 //+ " F " + _fps.ToString("F") 
-                + " C " + _sceneAnchor.transform.parent.eulerAngles.y.ToString("F")
+                + " C " + _cameraTransform.eulerAngles.y.ToString("F")
                 + " SA " + _sceneAnchor.transform.eulerAngles.y.ToString("F")
                 + " H " + _headingShown.ToString("F")
                 ;
             // + " N " + _arObjects.Count
         }
+    }
+
+    private Vector3 GetTarketPosition(ArObject arObject)
+    {
+        if(arObject == null
+)
+        {
+            return new Vector3(0, 0, 0);
+        }
+        return arObject.TargetPosition;
     }
 }

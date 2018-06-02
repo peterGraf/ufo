@@ -1,22 +1,38 @@
 # Config file for ArvosVun app
 #
 # Each entry is of the form
-# ObjectTag, Object name to set after instantiation, latitude, longitude
+# ObjectTag, Object name to set after instantiation, latitude in degrees, longitude in degrees, relative altitude in meters
 #
-RedCube,RC1,48.158860,11.578810
-RedCube,RC2,48.158760,11.578810
-BlueCube,BC1,48.158880,11.578810
-GreenCube,GC1,48.158860,11.578830
+REL,WhiteCube,N,0,30,0
+#
+ABS,BlueCube,SpinZ,48.158320,11.579020,0
+ABS,RedCube,SpinZ,48.158720,11.579020,0
+ABS,GreenCube,SpinZ,48.158320,11.578420,0
+ABS,GrayCube,SpinZ,48.158720,11.578420,0
+#
+# Cubes that stay on latitude or longitude because there latitude or longitude is 0
+#
+ABS,BlueCube,SpinY,48.158320,0,0
+ABS,RedCube,SpinY,0,11.579020,0
+ABS,GreenCube,SpinY,0,11.578420,0
+ABS,GrayCube,SpinY,48.158720,0,0
 #
 # These entries instantiate an object relative to player
+# Each entry is of the form
+# ObjectTag, Object name to set after instantiation, x offset in meters, z offset in meters, relative altitude in meters
 #
-BlueCube,BC2
+REL,RedCube,N,15,15,0
+REL,GrayCube,N,-15,15,0
+REL,BlueCube,N,15,-15,0
+REL,GreenCube,N,-15,-15,0
 #
 # These entries destroy the original game objects, so they are not visible in the scene
 #
-RedCube
-GreenCube
-BlueCube
+DEL,RedCube
+DEL,GreenCube
+DEL,BlueCube
+DEL,GrayCube
+DEL,WhiteCube
 #
 # This turns on the information string
 #
